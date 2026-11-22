@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>STL 3-Point DXF Slicer</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1115; color: #e5e7eb; overflow: hidden; display: flex; flex-direction: column; height: 100vh;
+    }
+    header {
+      height: 50px; background: #161920; border-bottom: 1px solid #2a2f3a;
+      display: flex; align-items: center; justify-content: space-between; padding: 0 16px; z-index: 20;
+    }
+    header h1 { font-size: 16px; font-weight: 600; margin: 0; color: #fff; }
+    .badge { font-size: 11px; background: #1e293b; color: #38bdf8; padding: 3px 8px; border-radius: 99px; border: 1px solid #0284c7; }
+    
+    .workspace { display: flex; flex: 1; position: relative; overflow: hidden; }
+    #viewport3d { flex: 1; position: relative; touch-action: none; min-height: 240px; }
+
+    #sidebar {
+      width: 320px; background: #161920; border-left: 1px solid #2a2f3a;
+      display: flex; flex-direction: column; padding: 12px; gap: 10px; z-index: 15; overflow-y: auto;
+    }
+    .card { background: #1e222b; border: 1px solid #2d3340; border-radius: 8px; padding: 10px; }
+    .card-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; margin-bottom: 8px; }
+    
+    .btn {
+      width: 100%; padding: 9px 12px; border-radius: 6px; border: 1px solid #374151;
+      background: #262b36; color: #fff; font-size: 13px; font-weight: 500; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .btn:hover:not(:disabled) { background: #323846; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: #2563eb; border-color: #3b82f6; }
+    .btn-danger { color: #f87171; border-color: #7f1d1d; background: #2a1818; }
+    .btn-row { display: flex; gap: 8px; }
+
+    .file-btn-wrap { position: relative; overflow: hidden; display: block; width: 100%; }
+    .file-label {
+      display: block; text-align: center; padding: 10px; border: 1px dashed #4b5563;
+      border-radius: 6px; cursor: pointer; font-size: 13px; color: #93c5fd; background: #181c24;
+    }
+    #stlInput {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      opacity: 0; cursor: pointer; font-size: 16px;
+    }
+
+    .point-list { display: flex; flex-direction: column; gap: 5px; font-family: ui-monospace, monospace; font-size: 12px; }
+    .point-item {
+      display: flex; justify-content: space-between; background: #14171d;
+      padding: 5px 8px; border-radius: 4px; border: 1px solid #282d37;
+    }
+    .pt-tag { font-weight: 700; color: #facc15; }
+
+    #preview2d {
+      width: 100%; height: 160px; background: #0b0d10; border: 1px solid #2d3340;
+      border-radius: 6px; display: block;
+    }
+    .slider-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+    .slider-header { display: flex; justify-content: space-between; font-size: 12px; color: #9ca3af; }
+    .range-input { width: 100%; accent-color: #3b82f6; }
+
+    #status { font-size: 12px; color: #34d399; background: #064e3b44; border: 1px solid #065f46; padding: 8px; border-radius: 6px; line-height: 1.4; }
+    #status.error { color: #fca5a5; background: #7f1d1d44; border-color: #991b1b; }
+
+    @media (max-width: 768px) {
+      .workspace { flex-direction: column; }
+      #sidebar { width: 100%; height: 50vh; border-left: none; border-top: 1px solid #2a2f3a; }
+    }
+  </style>
+  <script src="https://jsdelivr.net"></script>
+  <script src="https://jsdelivr.net"></script>
+</head>
+<body>
+  <header>
+    <h1>STL 3-Point DXF Slicer</h1>
+    <span class="badge">Client-Side CAD</span>
+  </header>
+
+  <div class="workspace">
+    <div id="viewport3d"></div>
+
+    <aside id="sidebar">
+      <div id="status">Initializing...</div>
+
+      <div class="card">
+        <div class="card-title">1. Model Input</div>
+        <div class="file-btn-wrap">
+          <div class="file-label">Choose .STL File</div>
+          <input type="file" id="stlInput" />
+        </div>
+        <div class="btn-row" style="margin-top: 8px;">
+          <button class="btn" id="demoBtn">Load Demo Part</button>
+          <button class="btn" id="fitBtn" disabled>Center View</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">2. Three-Point Cutting Plane</div>
+        <div class="point-list">
+          <div class="point-item"><span class="pt-tag">P1 (Origin)</span><span id="p1Val">Not set</span></div>
+          <div class="point-item"><span class="pt-tag">P2 (+X Axis)</span><span id="p2Val">Not set</span></div>
+          <div class="point-item"><span class="pt-tag">P3 (Plane)</span><span id="p3Val">Not set</span></div>
+        </div>
+        <div class="slider-row">
+          <div class="slider-header"><span>Plane Normal Offset</span><span id="offsetVal">0.00</span></div>
+          <input class="range-input" type="range" id="offsetSlider" min="-50" max="50" step="0.5" value="0" disabled />
+        </div>
+        <div class="btn-row" style="margin-top: 10px;">
+          <button class="btn btn-danger" id="resetBtn" disabled>Reset Points</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">3. 2D Slice Preview & Export</div>
+        <canvas id="preview2d" width="280" height="160"></canvas>
+        <button class="btn btn-primary" id="exportBtn" style="margin-top: 10px;" disabled>Download 2D .DXF</button>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    window.onerror = function(msg, url, line) {
+      var s = document.getElementById('status');
+      if (s) {
+        s.className = 'error';
+        s.textContent = 'Error (line ' + line + '): ' + msg;
+      }
+    };
+  </script>
+
+  <script>
+    (function() {
+      var statusEl = document.getElementById('status');
+
+      if (typeof THREE === 'undefined') {
+        statusEl.className = 'error';
+        statusEl.textContent = 'Network Error: Could not load Three.js. Check internet connection.';
+        return;
+      }
+
+      // Built-in Binary + ASCII STL Parser (no external STLLoader CDN dependency)
+      function parseSTLBuffer(buffer) {
+        var view = new DataView(buffer);
+        var isBinary = false;
+
+        if (buffer.byteLength >= 84) {
+          var faceCount = view.getUint32(80, true);
+          var expectedBytes = 84 + faceCount * 50;
+          if (expectedBytes === buffer.byteLength) {
+            isBinary = true;
+          } else {
+            // Check header text if file has trailing padding
+            var headerText = '';
+            for (var h = 0; h < 5; h++) {
+              headerText += String.fromCharCode(view.getUint8(h));
+            }
+            if (headerText.toLowerCase() !== 'solid' && expectedBytes <= buffer.byteLength) {
+              isBinary = true;
+            }
+          }
+        }
+
+        var positions = new Array();
+
+        if (isBinary) {
+          var triCount = view.getUint32(80, true);
+          var offset = 84;
+          for (var i = 0; i < triCount; i++) {
+            offset += 12; // skip face normal
+            for (var v = 0; v < 3; v++) {
+              positions.push(
+                view.getFloat32(offset, true),
+                view.getFloat32(offset + 4, true),
+                view.getFloat32(offset + 8, true)
+              );
+              offset += 12;
+            }
+            offset += 2; // skip attribute byte count
+          }
+        } else {
+          var decoder = new TextDecoder('utf-8');
+          var text = decoder.decode(buffer);
+          var regex = /vertex\s+([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)\s+([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)\s+([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)/g;
+          var match;
+          while ((match = regex.exec(text)) !== null) {
+            positions.push(parseFloat(match.at(1)), parseFloat(match.at(2)), parseFloat(match.at(3)));
+          }
+        }
+
+        var geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geom.computeVertexNormals();
+        return geom;
+      }
+
+      var container = document.getElementById('viewport3d');
+      var scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0f1115);
+
+      var width = container.clientWidth || window.innerWidth;
+      var height = container.clientHeight || (window.innerHeight * 0.5);
+
+      var camera = new THREE.PerspectiveCamera(45, width / height, 0.01, 100000);
+      camera.position.set(100, 100, 100);
+
+      var renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      container.appendChild(renderer.domElement);
+
+      var controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+      var dirLight1 = new THREE.DirectionalLight(0xffffff, 1.1);
+      dirLight1.position.set(1, 2, 1.5);
+      scene.add(dirLight1);
+      var dirLight2 = new THREE.DirectionalLight(0x93c5fd, 0.6);
+      dirLight2.position.set(-1, -1, -1.5);
+      scene.add(dirLight2);
+
+      var grid = new THREE.GridHelper(200, 20, 0x334155, 0x1e293b);
+      scene.add(grid);
+
+      var targetMesh = null;
+      var pickedPoints = new Array();
+      var markers = new Array();
+      var sliceLinesObj = null;
+      var planePreviewObj = null;
+      var segments2D = new Array();
+      var meshDiagonal = 100;
+
+      var resetBtn = document.getElementById('resetBtn');
+      var fitBtn = document.getElementById('fitBtn');
